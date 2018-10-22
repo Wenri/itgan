@@ -37,7 +37,7 @@ class WeightNorm(Wrapper):
     ValueError: If `Layer` does not contain a `kernel` of weights
     NotImplementedError: If `data_init` is True and running graph execution
   """
-  def __init__(self, layer, data_init=True, **kwargs):
+  def __init__(self, layer, data_init=False, **kwargs):
     if not isinstance(layer, Layer):
       raise ValueError(
           'Please initialize `WeightNorm` layer with a '

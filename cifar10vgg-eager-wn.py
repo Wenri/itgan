@@ -34,7 +34,7 @@ class cifar10vgg:
         else:
             self.model.load_weights('cifar10vgg.h5')
 
-    def normalize(self,X_train,X_test):
+    def normalize(self, X_train, X_test):
         #this function normalize inputs for zero mean and unit variance
         # it is used when training a model.
         # Input: training set and test set
@@ -45,7 +45,7 @@ class cifar10vgg:
         X_test = (X_test-mean)/(std+1e-7)
         return X_train, X_test
 
-    def normalize_production(self,x):
+    def normalize_production(self, x):
         #this function is used to normalize instances in production according to saved training set statistics
         # Input: X - a training set
         # Output X - a normalized training set according to normalization constants.
@@ -222,7 +222,7 @@ class cifar10vgg:
             batch_samples += len(x_batch)
 
             train_losses, train_pred, grads = grad(tf.convert_to_tensor(x_batch), tf.convert_to_tensor(y_batch))
-            trainer = opt.apply_gradients(zip(grads, model.variables), global_step=global_step)
+            trainer = opt.apply_gradients(zip(grads, model.trainable_variables), global_step=global_step)
 
             correct += np.count_nonzero(np.argmax(train_pred, axis=1) == np.argmax(y_batch, axis=1))
             total_losses += train_losses
