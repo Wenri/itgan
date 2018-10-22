@@ -2,78 +2,41 @@
 from __future__ import print_function
 
 
-from tensorflow.keras.models import Model, Sequential
-from tensorflow.keras.layers import Dense, Dropout, Activation, GlobalMaxPooling2D
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, BatchNormalization
-from tensorflow.keras import regularizers
 from tensorflow.keras.datasets import cifar10
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow import keras
-from wn import WeightNorm
 import tensorflow as tf
 import numpy as np
+
+from encoder import Encoder
+
 
 def dump_variable(variables):
     for var in variables:
         print(var.name)
+
 
 def gaussian_noise_layer(input_layer, std=0.15):
     with tf.name_scope('GaussianNoiseLayer'):
         noise = tf.random_normal(shape=tf.shape(input_layer), mean=0.0, stddev=std, dtype=tf.float32)
         return input_layer + noise
 
-class Encoder(Model):
-    def __init__(self, weight_decay, num_classes):
-        super(Encoder, self).__init__(name='Encoder')
-        self.model = Sequential([
-            WeightNorm(Conv2D(128, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
-            Activation('relu'),
-            BatchNormalization(),
 
-            WeightNorm(Conv2D(128, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
-            Activation('relu'),
-            BatchNormalization(),
-
-            WeightNorm(Conv2D(128, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
-            Activation('relu'),
-            BatchNormalization(),
-            Dropout(0.5),
-
-            MaxPooling2D(pool_size=(2, 2)),
-
-            WeightNorm(Conv2D(256, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
-            Activation('relu'),
-            BatchNormalization(),
-
-            WeightNorm(Conv2D(256, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
-            Activation('relu'),
-            BatchNormalization(),
-
-            WeightNorm(Conv2D(256, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
-            Activation('relu'),
-            BatchNormalization(),
-            Dropout(0.5),
-
-            MaxPooling2D(pool_size=(2, 2)),
-
-            WeightNorm(Conv2D(512, (3, 3), padding='valid',kernel_regularizer=regularizers.l2(weight_decay))),
-            Activation('relu'),
-            BatchNormalization(),
-
-            WeightNorm(Conv2D(256, (1, 1), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
-            Activation('relu'),
-            BatchNormalization(),
-
-            WeightNorm(Conv2D(128, (1, 1), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
-            Activation('relu'),
-            BatchNormalization(),
-            GlobalMaxPooling2D(),
-        ])
-        self.cls_out = WeightNorm(Dense(num_classes))
-
-    def call(self, inputs, training=None, mask=None):
-        feature = self.model(inputs, training=training)
-        return self.cls_out(feature)
+def loss_metric(c_m, z_m, mask = None):
+    with tf.name_scope('L_GT'):
+        if mask is not None:
+            c_m = tf.boolean_mask(tf.Print(c_m, [tf.argmax(c, axis=1), mask], "SemiLabel"), mask)
+            z_m = tf.boolean_mask(z_m, mask)
+        n_labels = tf.count_nonzero(tf.reduce_sum(c_m, axis=0) > 0.1)
+        two_labels = tf.count_nonzero(tf.reduce_sum(c_m, axis=0) > 1.1)
+        cond = tf.logical_and(two_labels>0, n_labels>1)
+        return tf.cond(cond,
+            lambda: tf.reduce_mean(
+                tf.reduce_max(c_m, axis=1)
+            ) * tf.contrib.losses.metric_learning.triplet_semihard_loss(
+                labels = tf.argmax(c_m, axis=1), embeddings = z_m, margin=0.2
+            ),
+            lambda: tf.constant(0, dtype=tf.float32))
 
 class cifar10vgg:
     def __init__(self, train=True):
@@ -120,7 +83,7 @@ class cifar10vgg:
         test_pred = np.zeros((num_data, self.num_classes))
         for b in range(0, num_data, batch_size):
             bsize = min(batch_size, num_data - b)
-            test_pred[b:b+bsize] = self.model(tf.convert_to_tensor(x[b:b+bsize]))
+            _, test_pred[b:b+bsize] = self.model(tf.convert_to_tensor(x[b:b+bsize]), training=False)
         return test_pred
 
     def train(self, model):
@@ -174,16 +137,17 @@ class cifar10vgg:
         batch_samples = 0
         total_samples = 0
 
-        def loss(outputs, targets):
-            cls_loss = tf.losses.softmax_cross_entropy(targets, outputs) #, weights=c_weights)
+        def loss(targets, metric_out, cls_out):
+            cls_loss = tf.losses.softmax_cross_entropy(targets, cls_out)
+            metric_loss = loss_metric(targets, metric_out)
             reg_term = tf.losses.get_regularization_loss(model.name)
-            return cls_loss + reg_term
+            return cls_loss + metric_loss + reg_term
 
         def grad(inputs, targets):
-          with tf.GradientTape() as tape:
-            outputs = model(inputs)
-            loss_value = loss(outputs, targets)
-            return loss_value, outputs, tape.gradient(loss_value, model.variables)
+            with tf.GradientTape() as tape:
+                metric_out, cls_out = model(inputs, training=True)
+                loss_value = loss(targets, metric_out, cls_out)
+                return loss_value, cls_out, tape.gradient(loss_value, model.trainable_variables)
 
         for x_batch, y_batch in datagen.flow(x_train, y_train, batch_size=batch_size):
             batches = batches + 1
@@ -194,7 +158,7 @@ class cifar10vgg:
 
             correct += np.count_nonzero(np.argmax(train_pred, axis=1) == np.argmax(y_batch, axis=1))
             total_losses += train_losses
-            if(batch_samples >= num_data):
+            if batch_samples >= num_data:
                 total_samples += batch_samples
                 test_pred = np.argmax(self.predict(x_test, False), axis=1)
                 test_gt = np.argmax(y_test, axis=1)
