@@ -2,8 +2,8 @@
 from __future__ import print_function
 
 
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, Activation, Flatten
+from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.layers import Dense, Dropout, Activation, GlobalMaxPooling2D
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, BatchNormalization
 from tensorflow.keras import regularizers
 from tensorflow.keras.datasets import cifar10
@@ -22,8 +22,61 @@ def gaussian_noise_layer(input_layer, std=0.15):
         noise = tf.random_normal(shape=tf.shape(input_layer), mean=0.0, stddev=std, dtype=tf.float32)
         return input_layer + noise
 
+class Encoder(Model):
+    def __init__(self, weight_decay, num_classes):
+        super(Encoder, self).__init__(name='Encoder')
+        self.model = Sequential([
+            WeightNorm(Conv2D(128, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
+            Activation('relu'),
+            BatchNormalization(),
+
+            WeightNorm(Conv2D(128, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
+            Activation('relu'),
+            BatchNormalization(),
+
+            WeightNorm(Conv2D(128, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
+            Activation('relu'),
+            BatchNormalization(),
+            Dropout(0.5),
+
+            MaxPooling2D(pool_size=(2, 2)),
+
+            WeightNorm(Conv2D(256, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
+            Activation('relu'),
+            BatchNormalization(),
+
+            WeightNorm(Conv2D(256, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
+            Activation('relu'),
+            BatchNormalization(),
+
+            WeightNorm(Conv2D(256, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
+            Activation('relu'),
+            BatchNormalization(),
+            Dropout(0.5),
+
+            MaxPooling2D(pool_size=(2, 2)),
+
+            WeightNorm(Conv2D(512, (3, 3), padding='valid',kernel_regularizer=regularizers.l2(weight_decay))),
+            Activation('relu'),
+            BatchNormalization(),
+
+            WeightNorm(Conv2D(256, (1, 1), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
+            Activation('relu'),
+            BatchNormalization(),
+
+            WeightNorm(Conv2D(128, (1, 1), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
+            Activation('relu'),
+            BatchNormalization(),
+            GlobalMaxPooling2D(),
+        ])
+        self.cls_out = WeightNorm(Dense(num_classes))
+
+    def call(self, inputs, training=None, mask=None):
+        feature = self.model(inputs, training=training)
+        return self.cls_out(feature)
+
 class cifar10vgg:
-    def __init__(self,train=True):
+    def __init__(self, train=True):
         self.num_classes = 10
         self.weight_decay = 0.0005
 
@@ -56,92 +109,7 @@ class cifar10vgg:
         return (x-mean)/(std+1e-7)
 
     def build_model(self):
-
-        model = Sequential()
-        weight_decay = self.weight_decay
-
-        model.add(WeightNorm(Conv2D(64, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-        model.add(Dropout(0.3))
-
-        model.add(WeightNorm(Conv2D(64, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-
-        model.add(MaxPooling2D(pool_size=(2, 2)))
-
-        model.add(WeightNorm(Conv2D(128, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-        model.add(Dropout(0.4))
-
-        model.add(WeightNorm(Conv2D(128, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-
-        model.add(MaxPooling2D(pool_size=(2, 2)))
-
-        model.add(WeightNorm(Conv2D(256, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-        model.add(Dropout(0.4))
-
-        model.add(WeightNorm(Conv2D(256, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-        model.add(Dropout(0.4))
-
-        model.add(WeightNorm(Conv2D(256, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-
-        model.add(MaxPooling2D(pool_size=(2, 2)))
-
-
-        model.add(WeightNorm(Conv2D(512, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-        model.add(Dropout(0.4))
-
-        model.add(WeightNorm(Conv2D(512, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-        model.add(Dropout(0.4))
-
-        model.add(WeightNorm(Conv2D(512, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-
-        model.add(MaxPooling2D(pool_size=(2, 2)))
-
-
-        model.add(WeightNorm(Conv2D(512, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-        model.add(Dropout(0.4))
-
-        model.add(WeightNorm(Conv2D(512, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-        model.add(Dropout(0.4))
-
-        model.add(WeightNorm(Conv2D(512, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-
-        model.add(MaxPooling2D(pool_size=(2, 2)))
-        model.add(Dropout(0.5))
-
-        model.add(Flatten())
-        model.add(WeightNorm(Dense(512,kernel_regularizer=regularizers.l2(weight_decay))))
-        model.add(Activation('relu'))
-        model.add(BatchNormalization())
-
-        model.add(Dropout(0.5))
-        model.add(WeightNorm(Dense(self.num_classes)))
-
-        dump_variable(model.variables)
+        model = Encoder(self.weight_decay, self.num_classes)
         return model
 
     def predict(self,x,normalize=True,batch_size=50):
@@ -179,7 +147,7 @@ class cifar10vgg:
         def _adj_learning_rate():
             return learning_rate / tf.to_float(2 ** (global_step * batch_size / num_data // lr_drop))
 
-        opt = tf.train.MomentumOptimizer(learning_rate=_adj_learning_rate, momentum=0.9)
+        opt = tf.train.AdamOptimizer(learning_rate=_adj_learning_rate, beta1=0.9)
 
         #data augmentation
         datagen = ImageDataGenerator(
@@ -254,7 +222,7 @@ if __name__ == '__main__':
     model = cifar10vgg()
 
     predicted_x = model.predict(x_test)
-    residuals = np.argmax(predicted_x,1)!=np.argmax(y_test,1)
+    residuals = np.argmax(predicted_x,1) != np.argmax(y_test,1)
 
     loss = sum(residuals)/len(residuals)
     print("the validation 0/1 loss is: ",loss)
