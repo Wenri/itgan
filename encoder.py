@@ -36,7 +36,7 @@ class Encoder(Model):
 
             MaxPooling2D(pool_size=(2, 2)),
 
-            WeightNorm(Conv2D(512, (3, 3), padding='valid',kernel_regularizer=regularizers.l2(weight_decay))),
+            WeightNorm(Conv2D(512, (3, 3), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
             Activation('relu'),
             BatchNormalization(),
             WeightNorm(Conv2D(256, (1, 1), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
@@ -45,14 +45,19 @@ class Encoder(Model):
             WeightNorm(Conv2D(128, (1, 1), padding='same',kernel_regularizer=regularizers.l2(weight_decay))),
             Activation('relu'),
             BatchNormalization(),
+            Dropout(0.5),
 
-            MaxPooling2D(pool_size=(2, 2)),
             Flatten(),
+            WeightNorm(Dense(1024)),
+            Activation('relu'),
+            BatchNormalization(),
+            Dropout(0.5),
+            WeightNorm(Dense(128)),
+            Activation('relu'),
+            BatchNormalization(),
         ])
-        self.metric_out = WeightNorm(Dense(128))
         self.cls_out = WeightNorm(Dense(num_classes))
 
     def call(self, inputs, training=None, mask=None):
-        feature = self.model(inputs, training=training)
-        metric_out = self.metric_out(feature)
+        metric_out = self.model(inputs, training=training)
         return metric_out, self.cls_out(metric_out)
