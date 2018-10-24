@@ -9,7 +9,7 @@ import tensorflow as tf
 import numpy as np
 
 from encoder import Encoder
-
+from triplet_loss import batch_all_triplet_loss
 
 def dump_variable(variables):
     for var in variables:
@@ -25,18 +25,19 @@ def gaussian_noise_layer(input_layer, std=0.15):
 def loss_metric(c_m, z_m, mask = None):
     with tf.name_scope('L_GT'):
         if mask is not None:
-            c_m = tf.boolean_mask(tf.Print(c_m, [tf.argmax(c, axis=1), mask], "SemiLabel"), mask)
+            c_m = tf.boolean_mask(tf.Print(c_m, [tf.argmax(c_m, axis=1), mask], "SemiLabel"), mask)
             z_m = tf.boolean_mask(z_m, mask)
         n_labels = tf.count_nonzero(tf.reduce_sum(c_m, axis=0) > 0.1)
         two_labels = tf.count_nonzero(tf.reduce_sum(c_m, axis=0) > 1.1)
         cond = tf.logical_and(two_labels>0, n_labels>1)
-        return tf.cond(cond,
-            lambda: tf.reduce_mean(
-                tf.reduce_max(c_m, axis=1)
-            ) * tf.contrib.losses.metric_learning.triplet_semihard_loss(
-                labels = tf.argmax(c_m, axis=1), embeddings = z_m, margin=0.2
-            ),
-            lambda: tf.constant(0, dtype=tf.float32))
+
+        def triplet_loss():
+            loss, frac = batch_all_triplet_loss(
+                labels=tf.argmax(c_m, axis=1), embeddings=z_m, margin=0.2
+            )
+            return loss
+
+        return tf.cond(cond, triplet_loss, lambda: tf.constant(0, dtype=tf.float32))
 
 class cifar10vgg:
     def __init__(self, train=True):
