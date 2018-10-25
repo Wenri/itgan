@@ -9,6 +9,7 @@ import tensorflow as tf
 import numpy as np
 
 from encoder import Encoder
+from decoder import Decoder
 from triplet_loss import batch_all_triplet_loss
 
 def dump_variable(variables):
@@ -39,12 +40,14 @@ def loss_metric(c_m, z_m, mask = None):
 
         return tf.cond(cond, triplet_loss, lambda: tf.constant(0, dtype=tf.float32))
 
+
 class cifar10vgg:
     def __init__(self, train=True):
         self.num_classes = 10
         self.weight_decay = 0.0005
+        self.x_shape = (32, 32, 3)
 
-        self.model = self.build_model()
+        self.model, self.decoder = self.build_model()
 
         if train:
             self.model = self.train(self.model)
@@ -52,7 +55,7 @@ class cifar10vgg:
             self.model.load_weights('cifar10vgg.h5')
 
     def normalize(self, X_train, X_test):
-        #this function normalize inputs for zero mean and unit variance
+        # this function normalize inputs for zero mean and unit variance
         # it is used when training a model.
         # Input: training set and test set
         # Output: normalized training set and test set according to the trianing set statistics.
@@ -63,18 +66,20 @@ class cifar10vgg:
         return X_train, X_test
 
     def normalize_production(self, x):
-        #this function is used to normalize instances in production according to saved training set statistics
+        # this function is used to normalize instances in production according to saved training set statistics
         # Input: X - a training set
         # Output X - a normalized training set according to normalization constants.
 
-        #these values produced during first training and are general for the standard cifar10 training set normalization
+        # these values produced during first training and are general for the standard cifar10 training set normalization
         mean = 120.707
         std = 64.15
         return (x-mean)/(std+1e-7)
 
     def build_model(self):
-        model = Encoder(self.weight_decay, self.num_classes)
-        return model
+        encoder = Encoder(self.x_shape, self.num_classes, self.weight_decay)
+        decoder = Decoder(self.x_shape)
+
+        return encoder, decoder
 
     def predict(self,x,normalize=True,batch_size=50):
         if normalize:
@@ -89,13 +94,15 @@ class cifar10vgg:
 
     def train(self, model):
 
-        #training parameters
+        # training parameters
         batch_size = 128
         maxepoches = 250
         learning_rate = 0.001
         lr_decay = 1e-6
         lr_drop = 20
+
         # The data, shuffled and split between train and test sets:
+        print('Loading Data...')
         (x_train, y_train), (x_test, y_test) = cifar10.load_data()
         x_train = x_train.astype('float32')
         x_test = x_test.astype('float32')
@@ -113,6 +120,7 @@ class cifar10vgg:
 
         opt = tf.train.AdamOptimizer(learning_rate=_adj_learning_rate, beta1=0.9)
 
+        print('Fitting DataGenerator...')
         #data augmentation
         datagen = ImageDataGenerator(
             featurewise_center=False,  # set input mean to 0 over the dataset
@@ -137,6 +145,7 @@ class cifar10vgg:
         batches = 0
         batch_samples = 0
         total_samples = 0
+        show_summary = True
 
         def loss(targets, metric_out, cls_out):
             cls_loss = tf.losses.softmax_cross_entropy(targets, cls_out)
@@ -145,16 +154,22 @@ class cifar10vgg:
             return cls_loss + metric_loss + reg_term
 
         def grad(inputs, targets):
-            with tf.GradientTape() as tape:
-                metric_out, cls_out = model(inputs, training=True)
+            with tf.GradientTape(persistent=True) as tape:
+                metric_out, cls_out, z_avg, z_log_var = model(inputs, training=True)
                 loss_value = loss(targets, metric_out, cls_out)
-                return loss_value, cls_out, tape.gradient(loss_value, model.trainable_variables)
+                grad_model = tape.gradient(loss_value, model.trainable_variables)
+            del tape
+            return loss_value, cls_out, grad_model
 
+        print('Starting Training Loop...')
         for x_batch, y_batch in datagen.flow(x_train, y_train, batch_size=batch_size):
             batches = batches + 1
             batch_samples += len(x_batch)
 
             train_losses, train_pred, grads = grad(tf.convert_to_tensor(x_batch), tf.convert_to_tensor(y_batch))
+            if show_summary:
+                model.summary()
+                show_summary = False
             trainer = opt.apply_gradients(zip(grads, model.trainable_variables), global_step=global_step)
 
             correct += np.count_nonzero(np.argmax(train_pred, axis=1) == np.argmax(y_batch, axis=1))
@@ -172,9 +187,8 @@ class cifar10vgg:
 
         return model
 
+
 if __name__ == '__main__':
-
-
     tf.enable_eager_execution()
 
     (x_train, y_train), (x_test, y_test) = cifar10.load_data()
