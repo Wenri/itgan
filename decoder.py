@@ -33,19 +33,17 @@ def build_model(input_shape):
     w = input_shape[0] // (2 ** 3)
     d = input_shape[2]
 
-    inputs = Input(shape=256)
+    inputs = Input(shape=(256,))
 
     x = Dense(w * w * 256)(inputs)
     x = BatchNormalization()(x)
     x = PReLU(alpha_initializer='zeros', alpha_regularizer=None, alpha_constraint=None)(x)
     x = Reshape((w, w, 256))(x)
 
-    x = Conv2DTranspose(256, kernel_size=(3,3), strides=(1,1), padding='same', activation=None)(x)
-    x = BatchNormalization()(x)
-    x = PReLU(alpha_initializer='zeros', alpha_regularizer=None, alpha_constraint=None)(x)
-
+    x = up_block(x)
+    
     for i in range(16):
-        x = res_block(x, 256)
+        x = res_block(x, 64)
 
     x = up_block(x)
     x = up_block(x)
