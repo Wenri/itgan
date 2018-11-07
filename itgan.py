@@ -50,7 +50,7 @@ class cifar10vgg:
         self.model, self.decoder = self.build_model()
 
         if train:
-            self.model = self.train(self.model)
+            self.model = self.train(self.model, self.decoder)
         else:
             self.model.load_weights('cifar10vgg.h5')
 
@@ -89,10 +89,10 @@ class cifar10vgg:
         test_pred = np.zeros((num_data, self.num_classes))
         for b in range(0, num_data, batch_size):
             bsize = min(batch_size, num_data - b)
-            _, test_pred[b:b+bsize] = self.model(tf.convert_to_tensor(x[b:b+bsize]), training=False)
+            _, test_pred[b:b+bsize], _, _ = self.model(tf.convert_to_tensor(x[b:b+bsize]), training=False)
         return test_pred
 
-    def train(self, model):
+    def train(self, model, decoder):
 
         # training parameters
         batch_size = 128
@@ -141,47 +141,65 @@ class cifar10vgg:
         tf.local_variables_initializer()
 
         total_losses = 0.0
+        total_recon = 0.0
         correct = 0
         batches = 0
         batch_samples = 0
         total_samples = 0
         show_summary = True
 
-        def loss(targets, metric_out, cls_out):
+        def loss_model(targets, metric_out, cls_out):
             cls_loss = tf.losses.softmax_cross_entropy(targets, cls_out)
             metric_loss = loss_metric(targets, metric_out)
-            reg_term = tf.losses.get_regularization_loss(model.name)
-            return cls_loss + metric_loss + reg_term
+            #reg_losses = model.losses
+            #print(reg_losses)
+            #reg_term = tf.add_n(model.losses)
+            return cls_loss + metric_loss #+ reg_term
+
+        def loss_recon(inputs, recon):
+            l1_loss = tf.losses.absolute_difference(inputs, recon, reduction=tf.losses.Reduction.MEAN)
+            return l1_loss
 
         def grad(inputs, targets):
             with tf.GradientTape(persistent=True) as tape:
                 metric_out, cls_out, z_avg, z_log_var = model(inputs, training=True)
-                loss_value = loss(targets, metric_out, cls_out)
-                grad_model = tape.gradient(loss_value, model.trainable_variables)
+                recon = decoder((z_avg, z_log_var), training=True)
+                loss_cls = loss_model(targets, metric_out, cls_out)
+                loss_dec = loss_recon(inputs, recon)
+                grad_models = tape.gradient(loss_cls + loss_dec, model.trainable_variables + decoder.trainable_variables)
             del tape
-            return loss_value, cls_out, grad_model
+            return loss_cls, loss_dec, cls_out, grad_models
+
+        def assign_updates(layer):
+            for old_value, new_value in layer.updates:
+                old_value.assign(new_value)
 
         print('Starting Training Loop...')
         for x_batch, y_batch in datagen.flow(x_train, y_train, batch_size=batch_size):
             batches = batches + 1
             batch_samples += len(x_batch)
 
-            train_losses, train_pred, grads = grad(tf.convert_to_tensor(x_batch), tf.convert_to_tensor(y_batch))
+            train_losses, recon_losses, train_pred, grads = grad(tf.convert_to_tensor(x_batch), tf.convert_to_tensor(y_batch))
             if show_summary:
                 model.summary()
+                decoder.summary()
                 show_summary = False
-            trainer = opt.apply_gradients(zip(grads, model.trainable_variables), global_step=global_step)
+            trainer = opt.apply_gradients(zip(grads, model.trainable_variables + decoder.trainable_variables), global_step=global_step)
+            assign_updates(model)
+            assign_updates(decoder)
 
             correct += np.count_nonzero(np.argmax(train_pred, axis=1) == np.argmax(y_batch, axis=1))
             total_losses += train_losses
+            total_recon += recon_losses
             if batch_samples >= num_data:
                 total_samples += batch_samples
                 test_pred = np.argmax(self.predict(x_test, False), axis=1)
                 test_gt = np.argmax(y_test, axis=1)
                 accuracy = np.mean(test_pred == test_gt)
-                print("epoch = %.2f, loss = %f, train_accuracy = %.4f, test_accuracy = %.4f" % 
-                    (total_samples / num_data, total_losses * batch_size / batch_samples, correct / batch_samples, accuracy))
+                print("epoch = %.2f, loss = %f (recon = %f), train_accuracy = %.4f, test_accuracy = %.4f" % 
+                    (total_samples / num_data, total_losses * batch_size / batch_samples, total_recon * batch_size / batch_samples, correct / batch_samples, accuracy))
                 total_losses = 0.0
+                total_recon = 0.0
                 correct = 0
                 batch_samples = 0
 
@@ -205,6 +223,4 @@ if __name__ == '__main__':
 
     loss = sum(residuals)/len(residuals)
     print("the validation 0/1 loss is: ",loss)
-
-
 

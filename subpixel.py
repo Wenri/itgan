@@ -28,4 +28,4 @@ def SubpixelConv2D(input_shape, scale=4):
     def subpixel(x):
         return tf.depth_to_space(x, scale)
 
-    return Lambda(subpixel, output_shape=subpixel_shape, name='subpixel')
+    return Lambda(subpixel, output_shape=subpixel_shape)
