@@ -11,6 +11,7 @@ import numpy as np
 from encoder import Encoder
 from decoder import Decoder
 from triplet_loss import batch_all_triplet_loss
+from utils import save_images
 
 def dump_variable(variables):
     for var in variables:
@@ -87,10 +88,13 @@ class cifar10vgg:
 
         num_data = len(x)
         test_pred = np.zeros((num_data, self.num_classes))
+        recon = np.zeros((num_data,) + self.x_shape)
         for b in range(0, num_data, batch_size):
             bsize = min(batch_size, num_data - b)
-            _, test_pred[b:b+bsize], _, _ = self.model(tf.convert_to_tensor(x[b:b+bsize]), training=False)
-        return test_pred
+            _, test_pred[b:b+bsize], z_avg, z_log_var = self.model(tf.convert_to_tensor(x[b:b+bsize]), training=False)
+            recon[b:b+bsize] = self.decoder((z_avg, z_log_var), training=False)
+
+        return test_pred, recon
 
     def train(self, model, decoder):
 
@@ -193,11 +197,13 @@ class cifar10vgg:
             total_recon += recon_losses
             if batch_samples >= num_data:
                 total_samples += batch_samples
-                test_pred = np.argmax(self.predict(x_test, False), axis=1)
+                test_pred, test_recon = self.predict(x_test, False)
+                test_pred = np.argmax(test_pred, axis=1)
                 test_gt = np.argmax(y_test, axis=1)
                 accuracy = np.mean(test_pred == test_gt)
                 print("epoch = %.2f, loss = %f (recon = %f), train_accuracy = %.4f, test_accuracy = %.4f" % 
                     (total_samples / num_data, total_losses * batch_size / batch_samples, total_recon * batch_size / batch_samples, correct / batch_samples, accuracy))
+                save_images(test_recon, "test_images_step_%d.png" % global_step)
                 total_losses = 0.0
                 total_recon = 0.0
                 correct = 0

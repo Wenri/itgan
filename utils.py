@@ -1,5 +1,6 @@
 import tensorflow as tf
-
+from PIL import Image
+import numpy as np
 
 def image_cast(img):
     return tf.cast(img * 127.5 + 127.5, tf.uint8)
@@ -79,3 +80,28 @@ def time_format(t):
 def dump_variable(variables):
     for var in variables:
         print(var.name)
+
+
+def save_images(imgs, filename):
+        """
+        Save images generated from random sample numbers
+        """
+        imgs = np.clip(imgs, 0.0, 1.0)
+        if imgs.shape[3] == 1:
+            imgs = np.squeeze(imgs, axis=(3,))
+
+        _, height, width, dims = imgs.shape
+
+        margin = min(width, height) // 10
+        figure = np.ones(((margin + height) * 10 + margin, (margin + width) * 10 + margin, dims), np.float32)
+
+        for i in range(100):
+            row = i // 10
+            col = i % 10
+
+            y = margin + (margin + height) * row
+            x = margin + (margin + width) * col
+            figure[y:y+height, x:x+width, :] = imgs[i, :, :, :]
+
+        figure = Image.fromarray((figure * 255.0).astype(np.uint8))
+        figure.save(filename)
